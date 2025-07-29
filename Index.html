@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>برنامج البث الجماعي</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white p-4">
+  
+  <div class="text-center mb-4">
+    <h1 class="text-3xl font-bold mb-4">🎥 برنامج البث الجماعي</h1>
+    
+    <!-- معلومات الاتصال -->
+    <div class="bg-gray-800 rounded-lg p-4 mb-4">
+      <h2 class="text-xl mb-2">معلومات الغرفة</h2>
+      <div>
+        <label class="block mb-2">اسمك:</label>
+        <input id="username" type="text" class="bg-gray-700 px-3 py-2 rounded" placeholder="أدخل اسمك">
+      </div>
+      <div class="mt-2">
+        <label class="block mb-2">رقم الغرفة:</label>
+        <input id="roomId" type="text" class="bg-gray-700 px-3 py-2 rounded" placeholder="أدخل رقم الغرفة">
+      </div>
+      <button id="joinRoom" class="bg-blue-600 px-4 py-2 rounded mt-2">🚪 دخول الغرفة</button>
+    </div>
+
+    <!-- أزرار التحكم -->
+    <div class="space-x-2 rtl:space-x-reverse mb-4">
+      <button id="startStream" class="bg-green-600 px-4 py-2 rounded">🎥 بدء البث</button>
+      <button id="stopStream" class="bg-red-600 px-4 py-2 rounded hidden">⏹️ إيقاف البث</button>
+      <button id="toggleMic" class="bg-gray-600 px-4 py-2 rounded">🎤 الميكروفون</button>
+      <button id="toggleCamera" class="bg-gray-600 px-4 py-2 rounded">📷 الكاميرا</button>
+    </div>
+  </div>
+
+  <!-- منطقة الفيديو -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+    <div class="bg-gray-800 rounded-lg p-4">
+      <h3 class="text-center mb-2">أنت</h3>
+      <video id="localVideo" class="w-full rounded" autoplay muted></video>
+    </div>
+    <div id="remoteVideos" class="contents"></div>
+  </div>
+
+  <!-- منطقة المحادثة -->
+  <div class="bg-gray-800 rounded-lg p-4">
+    <h3 class="text-xl mb-2">💬 المحادثة</h3>
+    <div id="messages" class="h-32 overflow-y-auto bg-gray-700 rounded p-2 mb-2"></div>
+    <div class="flex">
+      <input id="messageInput" type="text" class="flex-1 bg-gray-700 px-3 py-2 rounded-r-none rounded-l" placeholder="اكتب رسالتك...">
+      <button id="sendMessage" class="bg-blue-600 px-4 py-2 rounded-l-none rounded-r">إرسال</button>
+    </div>
+  </div>
+
+  <script>
+    // متغيرات أساسية
+    let localStream = null;
+    let username = '';
+    let roomId = '';
+    let isConnected = false;
+    let micEnabled = true;
+    let cameraEnabled = true;
+    let participants = new Map();
+
+    // عناصر DOM
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideos = document.getElementById('remoteVideos');
+    const messages = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+
+    // محاكاة الاتصال (بدون خادم حقيقي)
+    const mockConnections = new Map();
+    let currentRoom = null;
+
+    // دخول الغرفة
+    document.getElementById('joinRoom').addEventListener('click', () => {
+      username = document.getElementById('username').value.trim();
+      roomId = document.getElementById('roomId').value.trim();
+      
+      if (!username || !roomId) {
+        alert('يرجى إدخال الاسم ورقم الغرفة');
+        return;
+      }
+
+      // محاكاة الاتصال
+      isConnected = true;
+      currentRoom = roomId;
+      
+      addMessage('النظام', `مرحباً ${username}! تم الدخول إلى الغرفة ${roomId}`);
+      
+      // إضافة مشاركين وهميين
+      setTimeout(() => {
+        addParticipant('أحمد محمد');
+        addMessage('أحمد محمد', 'مرحباً بالجميع! 👋');
+      }, 2000);
+      
+      setTimeout(() => {
+        addParticipant('فاطمة أحمد');
+        addMessage('فاطمة أحمد', 'أهلاً وسهلاً! 😊');
+      }, 4000);
+    });
+
+    // بدء البث
+    document.getElementById('startStream').addEventListener('click', async () => {
+      if (!isConnected) {
+        alert('يرجى الدخول إلى الغرفة أولاً');
+        return;
+      }
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true
+        });
+        
+        localVideo.srcObject = localStream;
+        document.getElementById('startStream').classList.add('hidden');
+        document.getElementById('stopStream').classList.remove('hidden');
+        
+        addMessage('النظام', `${username} بدأ البث المباشر 🎥`);
+        
+      } catch (err) {
+        alert('خطأ في الوصول للكاميرا: ' + err.message);
+      }
+    });
+
+    // إيقاف البث
+    document.getElementById('stopStream').addEventListener('click', () => {
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+        localVideo.srcObject = null;
+      }
+      
+      document.getElementById('startStream').classList.remove('hidden');
+      document.getElementById('stopStream').classList.add('hidden');
+      
+      addMessage('النظام', `${username} أوقف البث`);
+    });
+
+    // تبديل الميكروفون
+    document.getElementById('toggleMic').addEventListener('click', () => {
+      if (!localStream) return;
+      
+      micEnabled = !micEnabled;
+      localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
+      
+      const btn = document.getElementById('toggleMic');
+      btn.textContent = micEnabled ? '🎤 الميكروفون' : '🔇 مكتوم';
+      btn.className = micEnabled ? 'bg-gray-600 px-4 py-2 rounded' : 'bg-red-600 px-4 py-2 rounded';
+      
+      addMessage('النظام', `${username} ${micEnabled ? 'فتح' : 'أغلق'} الميكروفون`);
+    });
+
+    // تبديل الكاميرا
+    document.getElementById('toggleCamera').addEventListener('click', () => {
+      if (!localStream) return;
+      
+      cameraEnabled = !cameraEnabled;
+      localStream.getVideoTracks().forEach(track => track.enabled = cameraEnabled);
+      
+      const btn = document.getElementById('toggleCamera');
+      btn.textContent = cameraEnabled ? '📷 الكاميرا' : '📷 متوقفة';
+      btn.className = cameraEnabled ? 'bg-gray-600 px-4 py-2 rounded' : 'bg-red-600 px-4 py-2 rounded';
+      
+      addMessage('النظام', `${username} ${cameraEnabled ? 'فتح' : 'أغلق'} الكاميرا`);
+    });
+
+    // إرسال الرسائل
+    document.getElementById('sendMessage').addEventListener('click', () => {
+      const message = messageInput.value.trim();
+      if (message && username) {
+        addMessage(username, message);
+        messageInput.value = '';
+        
+        // رد تلقائي من المشاركين
+        setTimeout(() => {
+          const responses = [
+            'رائع! 👍',
+            'شكراً لك',
+            'أوافقك الرأي',
+            'معلومة مفيدة',
+            'ممتاز!'
+          ];
+          const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+          const participants = ['أحمد محمد', 'فاطمة أحمد'];
+          const randomParticipant = participants[Math.floor(Math.random() * participants.length)];
+          addMessage(randomParticipant, randomResponse);
+        }, 1000 + Math.random() * 2000);
+      }
+    });
+
+    // إضافة مشارك وهمي
+    function addParticipant(name) {
+      const participantDiv = document.createElement('div');
+      participantDiv.className = 'bg-gray-800 rounded-lg p-4';
+      participantDiv.innerHTML = `
+        <h3 class="text-center mb-2">${name}</h3>
+        <div class="w-full h-32 bg-gradient-to-r from-blue-500 to-purple-500 rounded flex items-center justify-center text-white font-bold">
+          📹 ${name}
+        </div>
+      `;
+      remoteVideos.appendChild(participantDiv);
+      participants.set(name, participantDiv);
+    }
+
+    // إضافة رسالة
+    function addMessage(sender, text) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'mb-2 p-2 bg-gray-600 rounded';
+      messageDiv.innerHTML = `<strong class="text-blue-400">${sender}:</strong> ${text}`;
+      messages.appendChild(messageDiv);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    // إرسال الرسالة بالضغط على Enter
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('sendMessage').click();
+      }
+    });
+  </script>
+</body>
+</html>
